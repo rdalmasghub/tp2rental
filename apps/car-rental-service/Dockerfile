@@ -5,7 +5,7 @@ COPY . .
 RUN gradle clean build -x test
 
 # Runtime stage
-FROM eclipse-temurin:17-jre-jammy@sha256:c6a5dd70fb24f4e07ef88cbda8efb613a5a649a1af071a41de8eaabd1ee6b5da
+FROM eclipse-temurin:25-jre-jammy@sha256:1c6798886da1ae157e6c751cedb80eacf15d883e651ffe9acdcc534c19f482de
 WORKDIR /app
 COPY --from=builder /app/build/libs/*.jar app.jar
 
