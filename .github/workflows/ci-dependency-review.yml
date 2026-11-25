@@ -1,0 +1,30 @@
+name: CI - dependency review
+
+# Pull requests only: the action compares the dependencies of the base and head
+# commits. There is deliberately no `paths` filter, so that the check exists on
+# every pull request and can be made required without blocking unrelated changes.
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: dependency-review-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+        with:
+          fail-on-severity: high

@@ -62,21 +62,43 @@ Depuis la racine :
 python scripts/course.py verify
 ```
 
-Cette commande exécute les tests Gradle et Pytest, puis Checkstyle et Ruff.
-Pour diagnostiquer une étape séparément, utiliser `test`, `lint`,
-`test-java`, `test-python`, `lint-java` ou `lint-python`.
+Cette commande exécute les tests Gradle et Pytest, puis Checkstyle et Ruff, puis
+la politique de chaîne logicielle. Pour diagnostiquer une étape séparément,
+utiliser `test`, `lint`, `test-java`, `test-python`, `lint-java`,
+`lint-python` ou `supply-chain-policy`.
+
+`supply-chain-policy` échoue si une action GitHub distante n'est pas référencée
+par un SHA de commit complet, ou si une instruction `FROM` n'a pas de digest
+`sha256`. Pour mettre à jour une référence, résoudre la nouvelle version puis
+garder la version lisible en commentaire (`# v6.1.0`) ; Dependabot le fait
+automatiquement.
 
 ## Intégration continue
 
-Chaque pull request vers `main` déclenche sept contrôles lisibles :
+Chaque pull request vers `main` déclenche huit contrôles lisibles :
 
 - tests, qualité et construction de l'image pour le service Java ;
 - tests, qualité et construction de l'image pour le service Python ;
-- détection de secrets sur l'historique Git.
+- détection de secrets sur l'historique Git ;
+- revue des dépendances modifiées (échec à partir de la sévérité `high`).
 
 Les rapports de tests et de qualité sont conservés sept jours comme artefacts
-GitHub Actions. Sur `main`, les images sont publiées dans GHCR puis analysées
-avec Trivy.
+GitHub Actions.
+
+## Chaîne logicielle
+
+Aucune image n'est publiée depuis une pull request. Sur `main`, après la
+publication dans GHCR, chaque service enchaîne deux jobs qui ne désignent
+l'image que par le digest fourni par Buildx :
+
+1. `supply-chain` génère un SBOM SPDX JSON (artefact conservé sept jours),
+   signe l'image avec Cosign sans clé, atteste sa provenance et son SBOM, puis
+   vérifie lui-même la signature et la provenance ;
+2. `scan` exécute Trivy sur ce même digest, seulement si la vérification a
+   réussi.
+
+La signature n'utilise aucune clé persistante : l'identité vérifiée est celle du
+workflow, prouvée par le jeton OIDC de GitHub Actions.
 
 ## Exécution avec Docker Compose
 
