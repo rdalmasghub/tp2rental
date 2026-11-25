@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,26 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 CAR_SERVICE = ROOT / "apps" / "car-rental-service"
 PRICING_SERVICE = ROOT / "apps" / "pricing-service"
+WORKFLOWS = ROOT / ".github" / "workflows"
+
+# Directories that never hold project-owned workflows or Dockerfiles.
+IGNORED_DIRECTORIES = {
+    ".git",
+    ".gradle",
+    ".venv",
+    "venv",
+    "build",
+    "node_modules",
+    "__pycache__",
+    "_site",
+}
+
+# `uses: owner/repo[/path]@ref`, optionally quoted, optionally in a list item.
+USES_PATTERN = re.compile(r"""^\s*(?:-\s+)?uses:\s*['"]?([^\s'"#]+)""")
+# `FROM [--platform=...] image[:tag][@digest] [AS stage]`.
+FROM_PATTERN = re.compile(r"^\s*FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?", re.IGNORECASE)
+FULL_COMMIT_SHA = re.compile(r"@[0-9a-f]{40}$")
+IMAGE_DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 
 
 def run(command: list[str], *, cwd: Path = ROOT) -> None:
@@ -61,9 +82,85 @@ def lint() -> None:
     lint_python()
 
 
+def action_violations(path: Path) -> list[str]:
+    """Return every remote action in a workflow that is not pinned to a commit."""
+    violations = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if line.lstrip().startswith("#"):
+            continue
+        match = USES_PATTERN.match(line)
+        if match is None:
+            continue
+        reference = match.group(1)
+        if reference.startswith("./"):
+            continue  # local action or reusable workflow: versioned with this repository
+        pattern = IMAGE_DIGEST if reference.startswith("docker://") else FULL_COMMIT_SHA
+        if pattern.search(reference) is None:
+            violations.append(
+                f"{path.relative_to(ROOT)}:{number}: "
+                f"action is not pinned to an immutable reference: {reference}"
+            )
+    return violations
+
+
+def dockerfile_violations(path: Path) -> list[str]:
+    """Return every FROM instruction that does not carry a SHA-256 digest."""
+    violations = []
+    stages: set[str] = set()
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        match = FROM_PATTERN.match(line)
+        if match is None:
+            continue
+        image, alias = match.groups()
+        location = f"{path.relative_to(ROOT)}:{number}"
+        if image.lower() == "scratch" or image.lower() in stages:
+            pass  # not a registry image: empty base or an earlier build stage
+        elif "$" in image:
+            violations.append(f"{location}: FROM uses a variable and cannot be verified: {image}")
+        elif IMAGE_DIGEST.search(image) is None:
+            violations.append(f"{location}: FROM has no sha256 digest: {image}")
+        if alias:
+            stages.add(alias.lower())
+    return violations
+
+
+def find_dockerfiles() -> list[Path]:
+    found = []
+    for directory, subdirectories, files in os.walk(ROOT):
+        subdirectories[:] = [name for name in subdirectories if name not in IGNORED_DIRECTORIES]
+        for name in files:
+            if name == "Dockerfile" or name.startswith("Dockerfile.") or name.endswith(".Dockerfile"):
+                found.append(Path(directory) / name)
+    return sorted(found)
+
+
+def supply_chain_policy() -> None:
+    workflows = sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")])
+    dockerfiles = find_dockerfiles()
+    if not workflows or not dockerfiles:
+        # A policy that scans nothing would always pass: treat it as a failure.
+        raise RuntimeError("No workflow or Dockerfile found: the policy cannot be checked")
+
+    violations = []
+    for workflow in workflows:
+        violations.extend(action_violations(workflow))
+    for dockerfile in dockerfiles:
+        violations.extend(dockerfile_violations(dockerfile))
+
+    if violations:
+        for violation in violations:
+            print(f"VIOLATION {violation}", file=sys.stderr)
+        raise RuntimeError(f"Supply chain policy failed: {len(violations)} violation(s)")
+    print(
+        f"OK supply chain policy: {len(workflows)} workflow(s) and "
+        f"{len(dockerfiles)} Dockerfile(s) use immutable references"
+    )
+
+
 def verify() -> None:
     test()
     lint()
+    supply_chain_policy()
 
 
 def compose_up() -> None:
@@ -146,6 +243,7 @@ def main() -> int:
             "lint",
             "lint-java",
             "lint-python",
+            "supply-chain-policy",
             "verify",
             "compose-up",
             "compose-down",
@@ -162,6 +260,7 @@ def main() -> int:
         "lint": lint,
         "lint-java": lint_java,
         "lint-python": lint_python,
+        "supply-chain-policy": supply_chain_policy,
         "verify": verify,
         "compose-up": compose_up,
         "compose-down": compose_down,
