@@ -16,12 +16,18 @@ updates:
     commit-message:
       prefix: "chore(deps)"
 
+  # Major Docker updates change the runtime contract of a service (Java 17 to 25,
+  # Gradle 8 to 9): they are decided by hand, not proposed every week.
   - package-ecosystem: docker
     directory: /apps/car-rental-service
     schedule:
       interval: weekly
     commit-message:
       prefix: "build(deps)"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: /apps/pricing-service
@@ -29,3 +35,7 @@ updates:
       interval: weekly
     commit-message:
       prefix: "build(deps)"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
