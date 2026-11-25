@@ -1,5 +1,5 @@
 # Build stage
-FROM gradle:8.14-jdk17@sha256:4adc63f5657468850c2012dc27efba47a25a61fab5a4993f4ff3bf8f295a751c AS builder
+FROM gradle:9.9-jdk17@sha256:c8a5562374eb0dc8b1e170ecdf5efb65828362aa66af94fde947902da02f5b72 AS builder
 WORKDIR /app
 COPY . .
 RUN gradle clean build -x test
